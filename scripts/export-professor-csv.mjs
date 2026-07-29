@@ -68,12 +68,17 @@ const rows = state.professors.map((professor) => {
   const events = state.contactEvents
     .filter((event) => event.professor_id === professor.id)
     .sort((a, b) => String(a.occurred_at || a.event_date).localeCompare(String(b.occurred_at || b.event_date)));
+  const communicationEvents = events.filter(
+    (event) => event.event_type !== "草稿" && event.direction !== "草稿",
+  );
   const first =
-    events.find((event) => event.direction === "发出" && event.event_type === "首次联系") ||
-    events.find((event) => event.direction === "发出");
-  const replies = events.filter((event) => event.direction === "收到" && event.event_type === "教授回复");
+    communicationEvents.find((event) => event.direction === "发出" && event.event_type === "首次联系") ||
+    communicationEvents.find((event) => event.direction === "发出");
+  const replies = communicationEvents.filter(
+    (event) => event.direction === "收到" && event.event_type === "教授回复",
+  );
   const latestReply = replies.at(-1);
-  const latest = events.at(-1);
+  const latest = communicationEvents.at(-1);
   const next = [...events].reverse().find((event) => event.next_action_date);
   const routes = state.applicationRoutes
     .filter((route) => route.professor_id === professor.id && Number(route.archived) !== 1)
