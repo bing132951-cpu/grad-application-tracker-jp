@@ -1235,7 +1235,7 @@ function ProfessorForm({ record }: { record?: Row }) {
 function ContactForm({ professor }: { professor: Row }) {
   return (
     <FormSection title={`${text(professor.name)}教授的联系事件`}>
-      <Select label="事件类型" name="event_type" defaultValue="教授回复" options={["首次联系", "追信", "再次联系", "申请人回复", "发送更新材料", "教授回复", "退信", "草稿", "暂停", "排除决定"]} />
+      <Select label="事件类型" name="event_type" defaultValue="教授回复" options={["首次联系", "追信", "再次联系", "申请人回复", "发送更新材料", "教授回复", "退信", "草稿", "定时发送", "暂停", "排除决定"]} />
       <Select label="方向" name="direction" defaultValue="收到" options={["发出", "收到", "草稿", "人工决定"]} />
       <Field label="日期" name="event_date" defaultValue={today()} type="date" required />
       <Field label="邮件主题" name="subject" defaultValue="" />

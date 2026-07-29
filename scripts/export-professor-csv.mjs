@@ -69,7 +69,9 @@ const rows = state.professors.map((professor) => {
     .filter((event) => event.professor_id === professor.id)
     .sort((a, b) => String(a.occurred_at || a.event_date).localeCompare(String(b.occurred_at || b.event_date)));
   const communicationEvents = events.filter(
-    (event) => event.event_type !== "草稿" && event.direction !== "草稿",
+    (event) =>
+      !["草稿", "定时发送"].includes(event.event_type) &&
+      !["草稿", "待发送"].includes(event.direction),
   );
   const first =
     communicationEvents.find((event) => event.direction === "发出" && event.event_type === "首次联系") ||
