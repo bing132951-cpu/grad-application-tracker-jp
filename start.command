@@ -4,7 +4,7 @@ set -eu
 SCRIPT_DIR=${0:A:h}
 cd "$SCRIPT_DIR"
 
-RUNTIME_ROOT="/Users/weixukai/.cache/codex-runtimes/codex-primary-runtime/dependencies"
+RUNTIME_ROOT="${HOME}/.cache/codex-runtimes/codex-primary-runtime/dependencies"
 CODEX_APP_NODE="/Applications/Codex.app/Contents/Resources/node/bin"
 APP_PORT="38765"
 

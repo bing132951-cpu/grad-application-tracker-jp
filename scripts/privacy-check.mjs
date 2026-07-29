@@ -10,6 +10,7 @@ const forbidden = [
   /研究計画書_WEI_XUKAI/i,
   /履歴書_WEI_XUKAI/i,
   /魏旭凯|魏旭凱|WEI XUKAI/,
+  /\/Users\/weixukai\//,
 ];
 const findings = [];
 
