@@ -10,12 +10,14 @@ type State = {
   subjects: Row[];
   professors: Row[];
   contactEvents: Row[];
+  schoolScreenings: Row[];
   workEvents: Row[];
   tasks: Row[];
   backups: Row[];
 };
 
-type Tab = "overview" | "schools" | "professors" | "activities" | "settings";
+type Tab = "overview" | "schools" | "professors" | "screenings" | "activities" | "settings";
+type ProfessorSection = "current" | "candidate" | "history";
 type Editor =
   | { kind: "school"; record?: Row }
   | { kind: "professor"; record?: Row }
@@ -32,6 +34,7 @@ const emptyState: State = {
   subjects: [],
   professors: [],
   contactEvents: [],
+  schoolScreenings: [],
   workEvents: [],
   tasks: [],
   backups: [],
@@ -41,6 +44,7 @@ const navItems: { id: Tab; label: string; symbol: string }[] = [
   { id: "overview", label: "申请总览", symbol: "⌂" },
   { id: "schools", label: "学校与入试", symbol: "校" },
   { id: "professors", label: "教授与套磁", symbol: "人" },
+  { id: "screenings", label: "全国筛选档案", symbol: "全" },
   { id: "activities", label: "工作记录", symbol: "记" },
   { id: "settings", label: "设置与数据", symbol: "设" },
 ];
@@ -67,6 +71,14 @@ function formatDate(value: unknown) {
   return raw.replaceAll("-", ".");
 }
 
+function formatDateTime(value: unknown) {
+  const raw = text(value);
+  if (!raw) return "待确定";
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/);
+  if (!match) return formatDate(raw);
+  return `${match[1]}.${match[2]}.${match[3]}${match[4] ? ` ${match[4]}:${match[5]}` : ""}`;
+}
+
 function statusClass(value: unknown) {
   const status = text(value);
   if (/排除|拒绝|不可|满员/.test(status)) return "danger";
@@ -84,6 +96,8 @@ export function TrackerApp() {
   const [query, setQuery] = useState("");
   const [year, setYear] = useState("all");
   const [showArchived, setShowArchived] = useState(false);
+  const [professorSection, setProfessorSection] = useState<ProfessorSection>("current");
+  const [showAllScreenings, setShowAllScreenings] = useState(false);
   const [expanded, setExpanded] = useState("");
   const [editor, setEditor] = useState<Editor>(null);
 
@@ -110,9 +124,18 @@ export function TrackerApp() {
 
   const professors = state.professors.filter(active);
   const schools = state.schools.filter(active);
-  const browsableProfessors = showArchived ? state.professors : professors;
   const browsableSchools = showArchived ? state.schools : schools;
-  const filteredProfessors = browsableProfessors.filter((professor) =>
+  const hasContact = (professor: Row) =>
+    state.contactEvents.some((event) => event.professor_id === professor.id);
+  const professorPool =
+    professorSection === "history"
+      ? state.professors.filter((professor) => !active(professor))
+      : state.professors.filter(
+          (professor) =>
+            active(professor) &&
+            (professorSection === "current" ? hasContact(professor) : !hasContact(professor)),
+        );
+  const filteredProfessors = professorPool.filter((professor) =>
     [professor.name, professor.university, professor.research, professor.current_status]
       .map(text)
       .join(" ")
@@ -130,16 +153,25 @@ export function TrackerApp() {
       .map((exam) => text(exam.intake_year));
     return matchesQuery && (year === "all" || examYears.includes(year));
   });
+  const visibleScreeningStatuses = /有可申请候选|N2结果待确认|2027制度待确认/;
+  const filteredScreenings = state.schoolScreenings.filter((screening) => {
+    const matchesQuery = [screening.university, screening.checked_organization, screening.related_faculty, screening.final_status]
+      .map(text)
+      .join(" ")
+      .toLowerCase()
+      .includes(query.toLowerCase());
+    return matchesQuery && (showAllScreenings || visibleScreeningStatuses.test(text(screening.final_status)));
+  });
 
   const metrics = useMemo(() => {
     const contacted = new Set(
       state.contactEvents
-        .filter((event) => text(event.event_type) === "首次联系")
+        .filter((event) => text(event.direction) === "发出")
         .map((event) => text(event.professor_id)),
     ).size;
     const replied = new Set(
       state.contactEvents
-        .filter((event) => text(event.event_type) === "教授回复")
+        .filter((event) => text(event.direction) === "收到" && text(event.event_type) === "教授回复")
         .map((event) => text(event.professor_id)),
     ).size;
     const waiting = professors.filter((p) => /等待回复/.test(text(p.current_status))).length;
@@ -191,7 +223,7 @@ export function TrackerApp() {
       const professor = state.professors.find((item) => item.id === event.professor_id);
       return {
         id: text(event.id),
-        date: text(event.event_date),
+        date: text(event.occurred_at || event.event_date),
         type: "教授联系",
         title: `${text(professor?.name)}教授 · ${text(event.event_type)}`,
         summary: text(event.summary),
@@ -206,7 +238,7 @@ export function TrackerApp() {
         title: text(event.title),
         summary: text(event.summary),
       }));
-    return [...contacts, ...work].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 30);
+    return [...contacts, ...work].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 80);
   }, [state.contactEvents, state.workEvents, state.professors]);
 
   const handleSaved = async (message: string) => {
@@ -254,7 +286,7 @@ export function TrackerApp() {
             <h1>{navItems.find((item) => item.id === tab)?.label}</h1>
           </div>
           <div className="top-actions">
-            {(tab === "schools" || tab === "professors") && (
+            {(tab === "schools" || tab === "professors" || tab === "screenings") && (
               <>
                 <label className="search">
                   <span>⌕</span>
@@ -265,14 +297,14 @@ export function TrackerApp() {
                     onChange={(event) => setQuery(event.target.value)}
                   />
                 </label>
-                <label className="archive-toggle">
+                {tab === "schools" && <label className="archive-toggle">
                   <input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} />
                   显示历史/排除
-                </label>
+                </label>}
               </>
             )}
             <button className="button ghost" onClick={reload}>刷新</button>
-            <button
+            {tab !== "screenings" && <button
               className="button primary"
               onClick={() =>
                 setEditor(
@@ -285,7 +317,7 @@ export function TrackerApp() {
               }
             >
               ＋ 新增记录
-            </button>
+            </button>}
           </div>
         </header>
 
@@ -324,10 +356,20 @@ export function TrackerApp() {
               <Professors
                 professors={filteredProfessors}
                 events={state.contactEvents}
+                section={professorSection}
+                setSection={setProfessorSection}
                 expanded={expanded}
                 setExpanded={setExpanded}
                 onEdit={(record) => setEditor({ kind: "professor", record })}
                 onEvent={(professor) => setEditor({ kind: "contact", professor })}
+              />
+            )}
+            {tab === "screenings" && (
+              <Screenings
+                rows={filteredScreenings}
+                total={state.schoolScreenings.length}
+                showAll={showAllScreenings}
+                setShowAll={setShowAllScreenings}
               />
             )}
             {tab === "activities" && (
@@ -502,8 +544,8 @@ function Schools({
                 const schoolExams = exams.filter((exam) => exam.school_id === school.id && active(exam));
                 const closest = schoolExams.filter((exam) => exam.application_end).sort((a, b) => text(a.application_end).localeCompare(text(b.application_end)))[0];
                 return (
-                  <>
-                    <tr key={text(school.id)}>
+                  <Fragment key={text(school.id)}>
+                    <tr>
                       <td><strong>{text(school.university)}</strong><small>{text(school.nature)}</small></td>
                       <td>{text(school.graduate_school)}<small>{text(school.major)}</small></td>
                       <td><Badge value={school.category} /></td>
@@ -524,7 +566,7 @@ function Schools({
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 );
               })}
             </tbody>
@@ -599,6 +641,8 @@ function SubjectRow({ subject, onSave }: { subject: Row; onSave: (subject: Row) 
 function Professors({
   professors,
   events,
+  section,
+  setSection,
   expanded,
   setExpanded,
   onEdit,
@@ -606,13 +650,33 @@ function Professors({
 }: {
   professors: Row[];
   events: Row[];
+  section: ProfessorSection;
+  setSection: (section: ProfessorSection) => void;
   expanded: string;
   setExpanded: (id: string) => void;
   onEdit: (record: Row) => void;
   onEvent: (record: Row) => void;
 }) {
+  const labels: Record<ProfessorSection, string> = {
+    current: "当前申请",
+    candidate: "尚未联系候选",
+    history: "历史联系与排除",
+  };
   return (
-    <div className="table-card">
+    <div className="page-stack">
+      <div className="filterbar">
+        {(Object.keys(labels) as ProfessorSection[]).map((item) => (
+          <button
+            key={item}
+            className={section === item ? "filter active" : "filter"}
+            onClick={() => setSection(item)}
+          >
+            {labels[item]}
+          </button>
+        ))}
+        <span className="result-count">{professors.length} 位教授</span>
+      </div>
+      <div className="table-card">
       <div className="table-scroll">
         <table>
           <thead><tr><th>教授</th><th>大学・研究室</th><th>研究方向</th><th>优先级</th><th>当前状态</th><th>下一行动</th><th /></tr></thead>
@@ -620,7 +684,7 @@ function Professors({
             {professors.map((professor) => {
               const professorEvents = events
                 .filter((event) => event.professor_id === professor.id)
-                .sort((a, b) => text(b.event_date).localeCompare(text(a.event_date)));
+                .sort((a, b) => text(b.occurred_at || b.event_date).localeCompare(text(a.occurred_at || a.event_date)));
               const next = professorEvents.find((event) => event.next_action_date);
               return (
                 <Fragment key={text(professor.id)}>
@@ -651,6 +715,7 @@ function Professors({
         </table>
         {!professors.length && <Empty text="还没有教授记录。点击“新增记录”开始。" />}
       </div>
+      </div>
     </div>
   );
 }
@@ -670,16 +735,76 @@ function ProfessorDetails({ professor, events }: { professor: Row; events: Row[]
         <h4>完整联系时间线</h4>
         {events.length ? events.map((event) => (
           <div className="contact-event" key={text(event.id)}>
-            <time>{formatDate(event.event_date)}</time>
+            <time>{formatDateTime(event.occurred_at || event.event_date)}</time>
             <span className="timeline-dot" />
             <div>
-              <strong>{text(event.event_type)}</strong>
+              <strong>{text(event.event_type)} · {text(event.direction) || "手动"}</strong>
+              {event.subject && <p className="event-subject">{text(event.subject)}</p>}
               <p>{text(event.summary) || "没有摘要"}</p>
               {event.attachments && <small>附件：{text(event.attachments)}</small>}
               {event.status_after && <Badge value={event.status_after} />}
+              {event.gmail_url && <a href={text(event.gmail_url)} target="_blank" rel="noreferrer">打开这封邮件 ↗</a>}
             </div>
           </div>
         )) : <Empty text="尚未联系。首次发送后在这里添加事件。" />}
+      </div>
+    </div>
+  );
+}
+
+function Screenings({
+  rows,
+  total,
+  showAll,
+  setShowAll,
+}: {
+  rows: Row[];
+  total: number;
+  showAll: boolean;
+  setShowAll: (value: boolean) => void;
+}) {
+  return (
+    <div className="page-stack">
+      <div className="section-intro">
+        <div>
+          <h2>全国国公立高度人才加分校筛选档案</h2>
+          <p>日常默认只显示可申请、N2待确认和制度待确认学校；排除记录仍完整保留。</p>
+        </div>
+        <label className="archive-toggle">
+          <input type="checkbox" checked={showAll} onChange={(event) => setShowAll(event.target.checked)} />
+          显示全部74校
+        </label>
+      </div>
+      <div className="filterbar">
+        <span className="result-count">当前显示 {rows.length}／{total} 所</span>
+      </div>
+      <div className="table-card">
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr><th>大学</th><th>区域・性质</th><th>最终状态</th><th>相关组织与教师</th><th>语言／制度</th><th>结论</th><th>依据</th></tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={text(row.id)}>
+                  <td><strong>{text(row.university)}</strong><small>{text(row.talent_path)}</small></td>
+                  <td>{text(row.region)}<small>{text(row.nature)}</small></td>
+                  <td><Badge value={row.final_status} /></td>
+                  <td>{text(row.checked_organization) || "待补充"}<small>{text(row.related_faculty)}</small></td>
+                  <td>{text(row.language_gate) || "待确认"}<small>{text(row.research_student_screening)}</small></td>
+                  <td className="research-cell">{text(row.conclusion) || "待补充"}</td>
+                  <td>
+                    {row.official_source
+                      ? <a href={text(row.official_source).split(/\s+/)[0]} target="_blank" rel="noreferrer">官方资料 ↗</a>
+                      : "待补充"}
+                    <small>核查：{formatDate(row.verified_at)}</small>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!rows.length && <Empty text="没有符合当前筛选条件的学校。" />}
+        </div>
       </div>
     </div>
   );
@@ -1000,8 +1125,10 @@ function ProfessorForm({ record }: { record?: Row }) {
 function ContactForm({ professor }: { professor: Row }) {
   return (
     <FormSection title={`${text(professor.name)}教授的联系事件`}>
-      <Select label="事件类型" name="event_type" defaultValue="教授回复" options={["首次联系", "追信", "教授回复", "再次联系", "暂停", "排除决定"]} />
+      <Select label="事件类型" name="event_type" defaultValue="教授回复" options={["首次联系", "追信", "申请人回复", "发送更新材料", "教授回复", "退信", "草稿", "暂停", "排除决定"]} />
+      <Select label="方向" name="direction" defaultValue="收到" options={["发出", "收到", "草稿", "人工决定"]} />
       <Field label="日期" name="event_date" defaultValue={today()} type="date" required />
+      <Field label="邮件主题" name="subject" defaultValue="" />
       <TextArea label="准确摘要" name="summary" defaultValue="" required />
       <Field label="附件" name="attachments" defaultValue="" placeholder="研究計画書.pdf；履歴書.pdf" />
       <Select label="事件后状态" name="status_after" defaultValue="等待回复" options={["已发送", "等待回复", "条件性等待", "已回复", "草稿暂缓", "排除", "不再联系"]} />

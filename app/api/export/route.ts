@@ -4,6 +4,9 @@ const privateKeys = new Set([
   "name",
   "email",
   "gmail_thread_id",
+  "gmail_message_id",
+  "gmail_url",
+  "subject",
   "summary",
   "attachments",
   "payload_json",
@@ -39,6 +42,7 @@ export async function GET(request: Request) {
             subjects: [],
             professors: [],
             contactEvents: [],
+            schoolScreenings: [],
             workEvents: [],
             tasks: [],
           }),
@@ -71,6 +75,7 @@ export async function POST(request: Request) {
     const order = [
       "subjects",
       "contact_events",
+      "school_screenings",
       "work_events",
       "tasks",
       "exams",
@@ -87,6 +92,7 @@ export async function POST(request: Request) {
       subjects: "subjects",
       professors: "professors",
       contactEvents: "contact_events",
+      schoolScreenings: "school_screenings",
       workEvents: "work_events",
       tasks: "tasks",
     };

@@ -13,6 +13,8 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
     "import:professors": "node scripts/import-professor-csv.mjs",
+    "import:screenings": "node scripts/import-screening-csv.mjs",
+    "export:professors": "node scripts/export-professor-csv.mjs",
     "privacy:check": "node scripts/privacy-check.mjs"
   },
   "dependencies": {

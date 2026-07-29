@@ -100,12 +100,38 @@ const schemaStatements = [
     professor_id TEXT NOT NULL,
     event_type TEXT NOT NULL,
     event_date TEXT NOT NULL,
+    occurred_at TEXT NOT NULL DEFAULT '',
+    direction TEXT NOT NULL DEFAULT '',
+    subject TEXT NOT NULL DEFAULT '',
     summary TEXT NOT NULL DEFAULT '',
     attachments TEXT NOT NULL DEFAULT '',
+    gmail_message_id TEXT NOT NULL DEFAULT '',
+    gmail_thread_id TEXT NOT NULL DEFAULT '',
+    gmail_url TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT 'Gmail',
     status_after TEXT NOT NULL DEFAULT '',
     next_action_date TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS school_screenings (
+    id TEXT PRIMARY KEY,
+    region TEXT NOT NULL DEFAULT '',
+    university TEXT NOT NULL,
+    nature TEXT NOT NULL DEFAULT '国立',
+    talent_path TEXT NOT NULL DEFAULT '',
+    checked_organization TEXT NOT NULL DEFAULT '',
+    language_gate TEXT NOT NULL DEFAULT '',
+    research_student_screening TEXT NOT NULL DEFAULT '',
+    related_faculty TEXT NOT NULL DEFAULT '',
+    final_status TEXT NOT NULL DEFAULT '待确认',
+    conclusion TEXT NOT NULL DEFAULT '',
+    official_source TEXT NOT NULL DEFAULT '',
+    verified_at TEXT NOT NULL DEFAULT '',
+    archived INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(university)
   )`,
   `CREATE TABLE IF NOT EXISTS work_events (
     id TEXT PRIMARY KEY,
@@ -139,9 +165,34 @@ const schemaStatements = [
 
 let initialized = false;
 
+async function ensureContactEventColumns(db: D1Database) {
+  const current = await db.prepare("PRAGMA table_info(contact_events)").all<{ name: string }>();
+  const columns = new Set((current.results ?? []).map((row) => row.name));
+  const additions: Record<string, string> = {
+    occurred_at: "TEXT NOT NULL DEFAULT ''",
+    direction: "TEXT NOT NULL DEFAULT ''",
+    subject: "TEXT NOT NULL DEFAULT ''",
+    gmail_message_id: "TEXT NOT NULL DEFAULT ''",
+    gmail_thread_id: "TEXT NOT NULL DEFAULT ''",
+    gmail_url: "TEXT NOT NULL DEFAULT ''",
+    source: "TEXT NOT NULL DEFAULT 'Gmail'",
+  };
+  for (const [name, definition] of Object.entries(additions)) {
+    if (!columns.has(name)) {
+      await db.prepare(`ALTER TABLE contact_events ADD COLUMN ${name} ${definition}`).run();
+    }
+  }
+  await db
+    .prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS contact_events_gmail_message_unique ON contact_events(gmail_message_id) WHERE gmail_message_id <> ''",
+    )
+    .run();
+}
+
 export async function ensureSchema(db = getD1()) {
   if (initialized) return db;
   await db.batch(schemaStatements.map((statement) => db.prepare(statement)));
+  await ensureContactEventColumns(db);
   initialized = true;
   return db;
 }
@@ -152,7 +203,7 @@ export async function allRows<T>(db: D1Database, table: string) {
 }
 
 export async function snapshot(db: D1Database) {
-  const [profiles, schools, exams, subjects, professors, contactEvents, workEvents, tasks] =
+  const [profiles, schools, exams, subjects, professors, contactEvents, schoolScreenings, workEvents, tasks] =
     await Promise.all([
       allRows(db, "profiles"),
       allRows(db, "schools"),
@@ -160,10 +211,11 @@ export async function snapshot(db: D1Database) {
       allRows(db, "subjects"),
       allRows(db, "professors"),
       allRows(db, "contact_events"),
+      allRows(db, "school_screenings"),
       allRows(db, "work_events"),
       allRows(db, "tasks"),
     ]);
-  return { profiles, schools, exams, subjects, professors, contactEvents, workEvents, tasks };
+  return { profiles, schools, exams, subjects, professors, contactEvents, schoolScreenings, workEvents, tasks };
 }
 
 export async function createBackup(db: D1Database, reason: string) {

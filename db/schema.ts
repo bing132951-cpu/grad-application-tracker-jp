@@ -109,12 +109,39 @@ export const contactEvents = sqliteTable("contact_events", {
   professorId: text("professor_id").notNull().references(() => professors.id),
   eventType: text("event_type").notNull(),
   eventDate: text("event_date").notNull(),
+  occurredAt: text("occurred_at").notNull().default(""),
+  direction: text("direction").notNull().default(""),
+  subject: text("subject").notNull().default(""),
   summary: text("summary").notNull().default(""),
   attachments: text("attachments").notNull().default(""),
+  gmailMessageId: text("gmail_message_id").notNull().default(""),
+  gmailThreadId: text("gmail_thread_id").notNull().default(""),
+  gmailUrl: text("gmail_url").notNull().default(""),
+  source: text("source").notNull().default("Gmail"),
   statusAfter: text("status_after").notNull().default(""),
   nextActionDate: text("next_action_date").notNull().default(""),
   ...timestamps,
 });
+
+export const schoolScreenings = sqliteTable("school_screenings", {
+  id: text("id").primaryKey(),
+  region: text("region").notNull().default(""),
+  university: text("university").notNull(),
+  nature: text("nature").notNull().default("国立"),
+  talentPath: text("talent_path").notNull().default(""),
+  checkedOrganization: text("checked_organization").notNull().default(""),
+  languageGate: text("language_gate").notNull().default(""),
+  researchStudentScreening: text("research_student_screening").notNull().default(""),
+  relatedFaculty: text("related_faculty").notNull().default(""),
+  finalStatus: text("final_status").notNull().default("待确认"),
+  conclusion: text("conclusion").notNull().default(""),
+  officialSource: text("official_source").notNull().default(""),
+  verifiedAt: text("verified_at").notNull().default(""),
+  archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("school_screenings_university_unique").on(table.university),
+]);
 
 export const workEvents = sqliteTable("work_events", {
   id: text("id").primaryKey(),

@@ -23,6 +23,10 @@ const tableConfig = {
     table: "professors",
     columns: ["id", "university", "graduate_school", "lab", "name", "title", "email", "lab_url", "research", "fit", "identity", "system_status", "language_status", "priority", "risk", "gmail_thread_id", "current_status", "archived"],
   },
+  screening: {
+    table: "school_screenings",
+    columns: ["id", "region", "university", "nature", "talent_path", "checked_organization", "language_gate", "research_student_screening", "related_faculty", "final_status", "conclusion", "official_source", "verified_at", "archived"],
+  },
   task: {
     table: "tasks",
     columns: ["id", "title", "due_date", "status", "related_school_id", "related_professor_id", "note"],
@@ -48,6 +52,9 @@ function validateEntity(entity: keyof typeof tableConfig, record: Record<string,
   }
   if (entity === "professor" && (!record.university || !record.name)) {
     throw new Error("大学和教授姓名为必填项。");
+  }
+  if (entity === "screening" && !record.university) {
+    throw new Error("全国筛选记录必须填写大学名称。");
   }
   if (entity === "exam") {
     if (![2027, 2028].includes(Number(record.intake_year))) {
@@ -81,6 +88,9 @@ export async function POST(request: Request) {
       record?: Record<string, RecordValue>;
       professorId?: string;
       event?: Record<string, string>;
+      events?: Record<string, string>[];
+      professorStatuses?: Record<string, string>;
+      screenings?: Record<string, RecordValue>[];
       workEvent?: Record<string, string>;
       reason?: string;
       backupId?: string;
@@ -117,15 +127,23 @@ export async function POST(request: Request) {
       await db.batch([
         db.prepare(
           `INSERT INTO contact_events
-           (id, professor_id, event_type, event_date, summary, attachments, status_after, next_action_date)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, professor_id, event_type, event_date, occurred_at, direction, subject, summary, attachments,
+            gmail_message_id, gmail_thread_id, gmail_url, source, status_after, next_action_date)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).bind(
           eventId,
           payload.professorId,
           payload.event.event_type,
           payload.event.event_date,
+          payload.event.occurred_at ?? payload.event.event_date,
+          payload.event.direction ?? "手动",
+          payload.event.subject ?? "",
           payload.event.summary ?? "",
           payload.event.attachments ?? "",
+          payload.event.gmail_message_id ?? "",
+          payload.event.gmail_thread_id ?? "",
+          payload.event.gmail_url ?? "",
+          payload.event.source ?? "手动记录",
           payload.event.status_after ?? "",
           payload.event.next_action_date ?? "",
         ),
@@ -145,6 +163,103 @@ export async function POST(request: Request) {
         ),
       ]);
       return Response.json({ ok: true, id: eventId });
+    }
+
+    if (payload.action === "rebuildContactEvents" && payload.events && payload.professorStatuses) {
+      const professorIds = new Set(
+        (await db.prepare("SELECT id FROM professors").all<{ id: string }>()).results?.map((row) => row.id) ?? [],
+      );
+      const seenMessages = new Set<string>();
+      for (const event of payload.events) {
+        if (!event.id || !event.professor_id || !professorIds.has(event.professor_id)) {
+          throw new Error("联系事件包含未知教授或缺少ID。");
+        }
+        validateDate(event.event_date, "event_date");
+        validateDate(event.next_action_date, "next_action_date");
+        if (event.gmail_message_id) {
+          if (seenMessages.has(event.gmail_message_id)) throw new Error("Gmail消息ID重复。");
+          seenMessages.add(event.gmail_message_id);
+        }
+      }
+      await createBackup(db, "Gmail真实时间线重建前");
+      const statements = [
+        db.prepare("DELETE FROM contact_events"),
+        db.prepare("DELETE FROM work_events WHERE event_type='教授联系'"),
+      ];
+      for (const event of payload.events) {
+        statements.push(
+          db.prepare(
+            `INSERT INTO contact_events
+             (id, professor_id, event_type, event_date, occurred_at, direction, subject, summary, attachments,
+              gmail_message_id, gmail_thread_id, gmail_url, source, status_after, next_action_date)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ).bind(
+            event.id,
+            event.professor_id,
+            event.event_type,
+            event.event_date,
+            event.occurred_at ?? event.event_date,
+            event.direction ?? "",
+            event.subject ?? "",
+            event.summary ?? "",
+            event.attachments ?? "",
+            event.gmail_message_id ?? "",
+            event.gmail_thread_id ?? "",
+            event.gmail_url ?? "",
+            event.source ?? "Gmail",
+            event.status_after ?? "",
+            event.next_action_date ?? "",
+          ),
+        );
+      }
+      for (const [professorId, status] of Object.entries(payload.professorStatuses)) {
+        if (!professorIds.has(professorId)) continue;
+        statements.push(
+          db.prepare("UPDATE professors SET current_status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(status, professorId),
+        );
+      }
+      await db.batch(statements);
+      return Response.json({ ok: true, count: payload.events.length });
+    }
+
+    if (payload.action === "replaceScreenings" && payload.screenings) {
+      const universities = new Set<string>();
+      for (const row of payload.screenings) {
+        if (!row.id || !row.university) throw new Error("全国筛选记录缺少大学或ID。");
+        if (universities.has(String(row.university))) throw new Error("全国筛选记录包含重复大学。");
+        universities.add(String(row.university));
+        validateDate(row.verified_at, "verified_at");
+      }
+      await createBackup(db, "导入全国筛选档案前");
+      const statements = [db.prepare("DELETE FROM school_screenings")];
+      for (const row of payload.screenings) {
+        statements.push(
+          db.prepare(
+            `INSERT INTO school_screenings
+             (id, region, university, nature, talent_path, checked_organization, language_gate,
+              research_student_screening, related_faculty, final_status, conclusion, official_source,
+              verified_at, archived)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ).bind(
+            row.id,
+            row.region ?? "",
+            row.university,
+            row.nature ?? "",
+            row.talent_path ?? "",
+            row.checked_organization ?? "",
+            row.language_gate ?? "",
+            row.research_student_screening ?? "",
+            row.related_faculty ?? "",
+            row.final_status ?? "待确认",
+            row.conclusion ?? "",
+            row.official_source ?? "",
+            row.verified_at ?? "",
+            row.archived ?? 0,
+          ),
+        );
+      }
+      await db.batch(statements);
+      return Response.json({ ok: true, count: payload.screenings.length });
     }
 
     if (payload.action === "workEvent" && payload.workEvent) {
@@ -199,12 +314,14 @@ export async function POST(request: Request) {
         subjects: "subjects",
         professors: "professors",
         contactEvents: "contact_events",
+        schoolScreenings: "school_screenings",
         workEvents: "work_events",
         tasks: "tasks",
       };
       const deletionOrder = [
         "subjects",
         "contact_events",
+        "school_screenings",
         "work_events",
         "tasks",
         "exams",
