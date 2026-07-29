@@ -1,98 +1,64 @@
-# vinext-starter
+# 日本大学院申请记录看板
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+一个在本人电脑运行的申请管理工具，用清楚的表格和时间线记录：
 
-## Prerequisites
+- 目标学校、研究科、专攻、年度与入试批次
+- 出愿时间、考试结构、考试科目与复习进度
+- 教授资料、研究匹配、联系日期、回复和下一行动
+- 制度核查、材料制作、研究计划修改等全部申请工作
 
-- Node.js `>=22.13.0`
+真实数据只保存在本机。公开仓库不包含申请人姓名、邮箱、教授邮件、Gmail 线程、附件或回复内容。
 
-## Quick Start
+## 三步开始
+
+1. 安装 Node.js 22.13 或更高版本。
+2. macOS 双击 `start.command`；或在终端运行 `pnpm install && pnpm dev`。
+3. 浏览器打开 `http://127.0.0.1:3000`，在“设置与数据”填写档案或导入备份。
+
+首次安装依赖需要联网。应用启动后只监听 `127.0.0.1`，不会公开到局域网或互联网。
+
+## 页面
+
+- **总览**：已完成工作、当前状态、最近期限、待办和薄弱科目。
+- **学校与入试**：严格分开 2027/2028 年度，记录官方要项、科目和复习状态。
+- **教授与套磁**：教授资料与完整联系时间线；当前状态来自最新事件。
+- **工作记录**：汇总联系、制度核查、材料准备和复习活动。
+- **设置与数据**：完整备份、恢复、导入和隐私安全的空白模板。
+
+## 数据和备份
+
+本地开发数据库由 Cloudflare D1 的本地模拟环境保存，位于未纳入 Git 的 `.wrangler/` 目录。每次修改前自动生成数据库内快照；也可以随时导出完整 JSON。
+
+建议把导出的完整备份保存到个人云盘或加密磁盘。公开分享时只使用“空白共享模板”。
+
+## 导入教授 CSV
+
+应用启动后，可导入既有中文教授台账：
 
 ```bash
-npm install
-npm run dev
-npm run build
+pnpm import:professors -- /绝对路径/教授台账.csv
 ```
 
-This starter does not use `wrangler.jsonc`.
+脚本只把数据发给本机 `127.0.0.1` 服务，不连接 Gmail。
 
-## Included Shape
+## 开发
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
-
-## Workspace Auth Headers
-
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
+```bash
+pnpm install
+pnpm dev
+pnpm test
+pnpm privacy:check
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+技术栈：React、TypeScript、vinext、Cloudflare D1、Drizzle。界面以中文为主，保留日文官方名称。
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+## 隐私边界
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
+- 不读取、发送或回复 Gmail。
+- 不上传研究计划书、履历书和成绩材料。
+- `.gitignore` 排除数据库、备份、导出、私人 CSV、环境变量和附件。
+- 推送公开仓库前必须运行 `pnpm privacy:check`。
 
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
+## License
 
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
-
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
-
-## Useful Commands
-
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+[MIT](LICENSE)
