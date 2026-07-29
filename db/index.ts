@@ -90,10 +90,40 @@ const schemaStatements = [
     risk TEXT NOT NULL DEFAULT '',
     gmail_thread_id TEXT NOT NULL DEFAULT '',
     current_status TEXT NOT NULL DEFAULT '候选',
+    match_grade TEXT NOT NULL DEFAULT '',
+    pipeline_stage TEXT NOT NULL DEFAULT '',
+    professor_stance TEXT NOT NULL DEFAULT '',
+    research_verified_at TEXT NOT NULL DEFAULT '',
     archived INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(university, name)
+  )`,
+  `CREATE TABLE IF NOT EXISTS application_routes (
+    id TEXT PRIMARY KEY,
+    professor_id TEXT NOT NULL,
+    school_id TEXT NOT NULL DEFAULT '',
+    exam_id TEXT NOT NULL DEFAULT '',
+    route_type TEXT NOT NULL,
+    intake TEXT NOT NULL,
+    route_status TEXT NOT NULL DEFAULT '待确认',
+    professor_stance TEXT NOT NULL DEFAULT '',
+    eligibility TEXT NOT NULL DEFAULT '',
+    language TEXT NOT NULL DEFAULT '',
+    supervisor_consent TEXT NOT NULL DEFAULT '',
+    application_start TEXT NOT NULL DEFAULT '',
+    application_end TEXT NOT NULL DEFAULT '',
+    exam_start TEXT NOT NULL DEFAULT '',
+    exam_end TEXT NOT NULL DEFAULT '',
+    guidelines_url TEXT NOT NULL DEFAULT '',
+    official_source TEXT NOT NULL DEFAULT '',
+    verified_at TEXT NOT NULL DEFAULT '',
+    next_action_date TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    archived INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(professor_id, route_type, intake)
   )`,
   `CREATE TABLE IF NOT EXISTS contact_events (
     id TEXT PRIMARY KEY,
@@ -189,10 +219,27 @@ async function ensureContactEventColumns(db: D1Database) {
     .run();
 }
 
+async function ensureProfessorColumns(db: D1Database) {
+  const current = await db.prepare("PRAGMA table_info(professors)").all<{ name: string }>();
+  const columns = new Set((current.results ?? []).map((row) => row.name));
+  const additions: Record<string, string> = {
+    match_grade: "TEXT NOT NULL DEFAULT ''",
+    pipeline_stage: "TEXT NOT NULL DEFAULT ''",
+    professor_stance: "TEXT NOT NULL DEFAULT ''",
+    research_verified_at: "TEXT NOT NULL DEFAULT ''",
+  };
+  for (const [name, definition] of Object.entries(additions)) {
+    if (!columns.has(name)) {
+      await db.prepare(`ALTER TABLE professors ADD COLUMN ${name} ${definition}`).run();
+    }
+  }
+}
+
 export async function ensureSchema(db = getD1()) {
   if (initialized) return db;
   await db.batch(schemaStatements.map((statement) => db.prepare(statement)));
   await ensureContactEventColumns(db);
+  await ensureProfessorColumns(db);
   initialized = true;
   return db;
 }
@@ -203,7 +250,7 @@ export async function allRows<T>(db: D1Database, table: string) {
 }
 
 export async function snapshot(db: D1Database) {
-  const [profiles, schools, exams, subjects, professors, contactEvents, schoolScreenings, workEvents, tasks] =
+  const [profiles, schools, exams, subjects, professors, contactEvents, applicationRoutes, schoolScreenings, workEvents, tasks] =
     await Promise.all([
       allRows(db, "profiles"),
       allRows(db, "schools"),
@@ -211,11 +258,12 @@ export async function snapshot(db: D1Database) {
       allRows(db, "subjects"),
       allRows(db, "professors"),
       allRows(db, "contact_events"),
+      allRows(db, "application_routes"),
       allRows(db, "school_screenings"),
       allRows(db, "work_events"),
       allRows(db, "tasks"),
     ]);
-  return { profiles, schools, exams, subjects, professors, contactEvents, schoolScreenings, workEvents, tasks };
+  return { profiles, schools, exams, subjects, professors, contactEvents, applicationRoutes, schoolScreenings, workEvents, tasks };
 }
 
 export async function createBackup(db: D1Database, reason: string) {

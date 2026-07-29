@@ -5,10 +5,12 @@ import test from "node:test";
 const root = new URL("../", import.meta.url);
 
 test("application source exposes the core record views", async () => {
-  const [page, layout, app] = await Promise.all([
+  const [page, layout, app, api, schema] = await Promise.all([
     readFile(new URL("app/page.tsx", root), "utf8"),
     readFile(new URL("app/layout.tsx", root), "utf8"),
     readFile(new URL("app/tracker-app.tsx", root), "utf8"),
+    readFile(new URL("app/api/state/route.ts", root), "utf8"),
+    readFile(new URL("db/schema.ts", root), "utf8"),
   ]);
 
   assert.match(page, /TrackerApp/);
@@ -20,6 +22,12 @@ test("application source exposes the core record views", async () => {
   assert.match(app, /显示历史\/排除/);
   assert.match(app, /恢复旧备份|restoreBackup/);
   assert.match(app, /未连接邮箱/);
+  assert.match(app, /替代入学路线/);
+  assert.match(app, /完整联系时间线/);
+  assert.match(app, /feed-day/);
+  assert.match(api, /isUniversityClosure/);
+  assert.match(api, /isFirst \? 14 : 30/);
+  assert.match(schema, /application_routes/);
 });
 
 test("public example is an empty privacy-safe template", async () => {

@@ -42,6 +42,7 @@ export async function GET(request: Request) {
             subjects: [],
             professors: [],
             contactEvents: [],
+            applicationRoutes: [],
             schoolScreenings: [],
             workEvents: [],
             tasks: [],
@@ -75,6 +76,7 @@ export async function POST(request: Request) {
     const order = [
       "subjects",
       "contact_events",
+      "application_routes",
       "school_screenings",
       "work_events",
       "tasks",
@@ -92,6 +94,7 @@ export async function POST(request: Request) {
       subjects: "subjects",
       professors: "professors",
       contactEvents: "contact_events",
+      applicationRoutes: "application_routes",
       schoolScreenings: "school_screenings",
       workEvents: "work_events",
       tasks: "tasks",

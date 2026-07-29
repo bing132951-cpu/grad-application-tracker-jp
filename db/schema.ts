@@ -98,6 +98,10 @@ export const professors = sqliteTable("professors", {
   risk: text("risk").notNull().default(""),
   gmailThreadId: text("gmail_thread_id").notNull().default(""),
   currentStatus: text("current_status").notNull().default("候选"),
+  matchGrade: text("match_grade").notNull().default(""),
+  pipelineStage: text("pipeline_stage").notNull().default(""),
+  professorStance: text("professor_stance").notNull().default(""),
+  researchVerifiedAt: text("research_verified_at").notNull().default(""),
   archived: integer("archived", { mode: "boolean" }).notNull().default(false),
   ...timestamps,
 }, (table) => [
@@ -122,6 +126,37 @@ export const contactEvents = sqliteTable("contact_events", {
   nextActionDate: text("next_action_date").notNull().default(""),
   ...timestamps,
 });
+
+export const applicationRoutes = sqliteTable("application_routes", {
+  id: text("id").primaryKey(),
+  professorId: text("professor_id").notNull().references(() => professors.id),
+  schoolId: text("school_id").notNull().default(""),
+  examId: text("exam_id").notNull().default(""),
+  routeType: text("route_type").notNull(),
+  intake: text("intake").notNull(),
+  routeStatus: text("route_status").notNull().default("待确认"),
+  professorStance: text("professor_stance").notNull().default(""),
+  eligibility: text("eligibility").notNull().default(""),
+  language: text("language").notNull().default(""),
+  supervisorConsent: text("supervisor_consent").notNull().default(""),
+  applicationStart: text("application_start").notNull().default(""),
+  applicationEnd: text("application_end").notNull().default(""),
+  examStart: text("exam_start").notNull().default(""),
+  examEnd: text("exam_end").notNull().default(""),
+  guidelinesUrl: text("guidelines_url").notNull().default(""),
+  officialSource: text("official_source").notNull().default(""),
+  verifiedAt: text("verified_at").notNull().default(""),
+  nextActionDate: text("next_action_date").notNull().default(""),
+  note: text("note").notNull().default(""),
+  archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("application_routes_unique").on(
+    table.professorId,
+    table.routeType,
+    table.intake,
+  ),
+]);
 
 export const schoolScreenings = sqliteTable("school_screenings", {
   id: text("id").primaryKey(),

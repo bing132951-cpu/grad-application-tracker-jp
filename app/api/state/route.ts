@@ -21,7 +21,11 @@ const tableConfig = {
   },
   professor: {
     table: "professors",
-    columns: ["id", "university", "graduate_school", "lab", "name", "title", "email", "lab_url", "research", "fit", "identity", "system_status", "language_status", "priority", "risk", "gmail_thread_id", "current_status", "archived"],
+    columns: ["id", "university", "graduate_school", "lab", "name", "title", "email", "lab_url", "research", "fit", "identity", "system_status", "language_status", "priority", "risk", "gmail_thread_id", "current_status", "match_grade", "pipeline_stage", "professor_stance", "research_verified_at", "archived"],
+  },
+  route: {
+    table: "application_routes",
+    columns: ["id", "professor_id", "school_id", "exam_id", "route_type", "intake", "route_status", "professor_stance", "eligibility", "language", "supervisor_consent", "application_start", "application_end", "exam_start", "exam_end", "guidelines_url", "official_source", "verified_at", "next_action_date", "note", "archived"],
   },
   screening: {
     table: "school_screenings",
@@ -45,6 +49,42 @@ function validateDate(value: unknown, field: string) {
   }
 }
 
+const japanHolidays = new Set([
+  "2026-08-11", "2026-09-21", "2026-09-22", "2026-09-23", "2026-10-12", "2026-11-03", "2026-11-23",
+  "2027-01-01", "2027-01-11", "2027-02-11", "2027-02-23", "2027-03-20", "2027-03-22", "2027-04-29",
+  "2027-05-03", "2027-05-04", "2027-05-05", "2027-07-19", "2027-08-11", "2027-09-20", "2027-09-23",
+  "2027-10-11", "2027-11-03", "2027-11-23",
+  "2028-01-01", "2028-01-10", "2028-02-11", "2028-02-23", "2028-03-20", "2028-04-29", "2028-05-03",
+  "2028-05-04", "2028-05-05", "2028-07-17", "2028-08-11", "2028-09-18", "2028-09-22", "2028-10-09",
+  "2028-11-03", "2028-11-23",
+]);
+
+function isoDate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function isUniversityClosure(date: Date) {
+  const month = date.getUTCMonth() + 1;
+  const day = date.getUTCDate();
+  return (month === 8 && day >= 13 && day <= 16)
+    || (month === 12 && day >= 29)
+    || (month === 1 && day <= 3);
+}
+
+function nextContactDate(base: string, days: number) {
+  const date = new Date(`${base.slice(0, 10)}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  while (
+    date.getUTCDay() === 0
+    || date.getUTCDay() === 6
+    || japanHolidays.has(isoDate(date))
+    || isUniversityClosure(date)
+  ) {
+    date.setUTCDate(date.getUTCDate() + 1);
+  }
+  return isoDate(date);
+}
+
 function validateEntity(entity: keyof typeof tableConfig, record: Record<string, RecordValue>) {
   if (!record.id) throw new Error("记录缺少唯一ID。");
   if (entity === "school" && (!record.university || !record.graduate_school || !record.major)) {
@@ -52,6 +92,17 @@ function validateEntity(entity: keyof typeof tableConfig, record: Record<string,
   }
   if (entity === "professor" && (!record.university || !record.name)) {
     throw new Error("大学和教授姓名为必填项。");
+  }
+  if (entity === "route") {
+    if (!record.professor_id || !record.route_type || !record.intake) {
+      throw new Error("申请路线必须关联教授，并填写路线类型和入学时间。");
+    }
+    if (!["2027-04", "2027-10", "2028-04"].includes(String(record.intake))) {
+      throw new Error("申请路线仅支持2027年4月、2027年10月和2028年4月。");
+    }
+    ["application_start", "application_end", "exam_start", "exam_end", "verified_at", "next_action_date"].forEach(
+      (field) => validateDate(record[field], field),
+    );
   }
   if (entity === "screening" && !record.university) {
     throw new Error("全国筛选记录必须填写大学名称。");
@@ -124,6 +175,25 @@ export async function POST(request: Request) {
       if (!payload.event.event_type) throw new Error("联系事件类型不能为空。");
       await createBackup(db, "新增教授联系事件");
       const eventId = payload.event.id || crypto.randomUUID();
+      const isOutbound = payload.event.direction === "发出";
+      const isFirst = payload.event.event_type === "首次联系";
+      const calculatedNext = isOutbound
+        ? nextContactDate(payload.event.occurred_at || payload.event.event_date, isFirst ? 14 : 30)
+        : "";
+      const nextActionDate = payload.event.next_action_date || calculatedNext;
+      const nextTask = nextActionDate
+        ? db.prepare(
+          `INSERT INTO tasks
+           (id, title, due_date, status, related_professor_id, note)
+           VALUES (?, ?, ?, '待处理', ?, ?)`
+        ).bind(
+          crypto.randomUUID(),
+          `${payload.event.status_after === "排除" ? "复核" : "联系"}教授：${payload.event.event_type}后的下一行动`,
+          nextActionDate,
+          payload.professorId,
+          isFirst ? "首次邮件14天后；遇周末、法定节假日及大学集中休假顺延。" : "上次发件30天后；发送前须人工确认。",
+        )
+        : null;
       await db.batch([
         db.prepare(
           `INSERT INTO contact_events
@@ -145,7 +215,7 @@ export async function POST(request: Request) {
           payload.event.gmail_url ?? "",
           payload.event.source ?? "手动记录",
           payload.event.status_after ?? "",
-          payload.event.next_action_date ?? "",
+          nextActionDate,
         ),
         db.prepare(
           "UPDATE professors SET current_status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
@@ -161,6 +231,7 @@ export async function POST(request: Request) {
           payload.event.summary ?? "",
           payload.professorId,
         ),
+        ...(nextTask ? [nextTask] : []),
       ]);
       return Response.json({ ok: true, id: eventId });
     }
@@ -314,6 +385,7 @@ export async function POST(request: Request) {
         subjects: "subjects",
         professors: "professors",
         contactEvents: "contact_events",
+        applicationRoutes: "application_routes",
         schoolScreenings: "school_screenings",
         workEvents: "work_events",
         tasks: "tasks",
@@ -321,6 +393,7 @@ export async function POST(request: Request) {
       const deletionOrder = [
         "subjects",
         "contact_events",
+        "application_routes",
         "school_screenings",
         "work_events",
         "tasks",

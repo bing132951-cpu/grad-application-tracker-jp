@@ -18,7 +18,8 @@ const headers = [
   "优先级", "申请层级", "匹配分", "计划书修改量", "建议版本", "RQ1", "RQ2", "RQ3",
   "制度状态", "语言状态", "2027年4月", "官方邮箱/渠道", "首次发送日期", "发送附件",
   "回复原意摘要", "回复分类", "是否需要追信", "下一行动日期", "当前状态", "是否排除",
-  "Gmail线程ID", "联系事件数", "最后联系时间", "最后核查日期", "备注",
+  "教授态度", "推进分组", "A/B匹配", "可行申请路线", "Gmail线程ID", "联系事件数",
+  "最后联系时间", "最后核查日期", "备注",
 ];
 
 function csv(value) {
@@ -74,6 +75,13 @@ const rows = state.professors.map((professor) => {
   const latestReply = replies.at(-1);
   const latest = events.at(-1);
   const next = [...events].reverse().find((event) => event.next_action_date);
+  const routes = state.applicationRoutes
+    .filter((route) => route.professor_id === professor.id && Number(route.archived) !== 1)
+    .sort((a, b) => String(a.intake).localeCompare(String(b.intake)));
+  const routeNext = routes.map((route) => route.next_action_date).filter(Boolean).sort()[0];
+  const routeSummary = routes
+    .map((route) => `${route.intake} ${route.route_type}：${route.route_status}`)
+    .join("；");
   const bounceOnly = !latestReply && events.some((event) => event.event_type === "退信");
   const archived = Number(professor.archived) === 1;
   const fitParts = String(professor.fit || "").split("；");
@@ -101,14 +109,18 @@ const rows = state.professors.map((professor) => {
     first?.attachments || "",
     latestReply?.summary || (bounceOnly ? "邮件未送达，未收到教授本人回复。" : ""),
     latestReply ? latestReply.status_after : bounceOnly ? "邮件退回" : first ? "等待回复" : "尚未发送",
-    next?.next_action_date ? "是" : "否",
-    next?.next_action_date || "",
+    (routeNext || next?.next_action_date) ? "是" : "否",
+    routeNext || next?.next_action_date || "",
     professor.current_status,
     archived ? "是" : "否",
+    professor.professor_stance,
+    professor.pipeline_stage,
+    professor.match_grade,
+    routeSummary,
     latest?.gmail_thread_id || professor.gmail_thread_id || "",
     events.length,
     latest?.occurred_at || "",
-    "2026-07-29",
+    professor.research_verified_at || "2026-07-29",
     professor.risk,
   ];
 });

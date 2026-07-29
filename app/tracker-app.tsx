@@ -10,6 +10,7 @@ type State = {
   subjects: Row[];
   professors: Row[];
   contactEvents: Row[];
+  applicationRoutes: Row[];
   schoolScreenings: Row[];
   workEvents: Row[];
   tasks: Row[];
@@ -34,6 +35,7 @@ const emptyState: State = {
   subjects: [],
   professors: [],
   contactEvents: [],
+  applicationRoutes: [],
   schoolScreenings: [],
   workEvents: [],
   tasks: [],
@@ -68,7 +70,8 @@ async function api(body: unknown) {
 function formatDate(value: unknown) {
   const raw = text(value);
   if (!raw) return "待确定";
-  return raw.replaceAll("-", ".");
+  const datePart = raw.match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? raw;
+  return datePart.replaceAll("-", ".");
 }
 
 function formatDateTime(value: unknown) {
@@ -97,6 +100,7 @@ export function TrackerApp() {
   const [year, setYear] = useState("all");
   const [showArchived, setShowArchived] = useState(false);
   const [professorSection, setProfessorSection] = useState<ProfessorSection>("current");
+  const [pipelineFilter, setPipelineFilter] = useState("全部");
   const [showAllScreenings, setShowAllScreenings] = useState(false);
   const [expanded, setExpanded] = useState("");
   const [editor, setEditor] = useState<Editor>(null);
@@ -125,22 +129,25 @@ export function TrackerApp() {
   const professors = state.professors.filter(active);
   const schools = state.schools.filter(active);
   const browsableSchools = showArchived ? state.schools : schools;
-  const hasContact = (professor: Row) =>
-    state.contactEvents.some((event) => event.professor_id === professor.id);
+  const hasSent = (professor: Row) =>
+    state.contactEvents.some(
+      (event) => event.professor_id === professor.id && text(event.direction) === "发出",
+    );
   const professorPool =
     professorSection === "history"
       ? state.professors.filter((professor) => !active(professor))
       : state.professors.filter(
           (professor) =>
             active(professor) &&
-            (professorSection === "current" ? hasContact(professor) : !hasContact(professor)),
+            (professorSection === "current" ? hasSent(professor) : !hasSent(professor)),
         );
   const filteredProfessors = professorPool.filter((professor) =>
     [professor.name, professor.university, professor.research, professor.current_status]
       .map(text)
       .join(" ")
       .toLowerCase()
-      .includes(query.toLowerCase()),
+      .includes(query.toLowerCase()) &&
+    (pipelineFilter === "全部" || text(professor.pipeline_stage) === pipelineFilter),
   );
   const filteredSchools = browsableSchools.filter((school) => {
     const matchesQuery = [school.university, school.graduate_school, school.major]
@@ -182,7 +189,7 @@ export function TrackerApp() {
   const upcoming = useMemo(() => {
     const rows: { date: string; title: string; type: string }[] = [];
     state.tasks
-      .filter((task) => task.status !== "完成" && task.due_date)
+      .filter((task) => !/完成/.test(text(task.status)) && task.due_date)
       .forEach((task) => rows.push({ date: text(task.due_date), title: text(task.title), type: "待办" }));
     state.exams
       .filter(active)
@@ -201,7 +208,7 @@ export function TrackerApp() {
         (task) =>
           task.related_professor_id === event.professor_id &&
           task.due_date === event.next_action_date &&
-          task.status !== "完成",
+          !/完成/.test(text(task.status)),
       );
       if (event.next_action_date && !alreadyTracked) {
         const professor = professors.find((item) => item.id === event.professor_id);
@@ -212,11 +219,34 @@ export function TrackerApp() {
         });
       }
     });
+    state.applicationRoutes.filter(active).forEach((route) => {
+      const professor = professors.find((item) => item.id === route.professor_id);
+      const alreadyTracked = state.tasks.some(
+        (task) =>
+          task.related_professor_id === route.professor_id &&
+          task.due_date === route.next_action_date &&
+          !/完成/.test(text(task.status)),
+      );
+      if (route.next_action_date && !alreadyTracked) {
+        rows.push({
+          date: text(route.next_action_date),
+          title: `${text(professor?.name)}教授：${text(route.route_type)}下一行动`,
+          type: text(route.intake),
+        });
+      }
+      if (route.application_end) {
+        rows.push({
+          date: text(route.application_end),
+          title: `${text(professor?.university)} ${text(route.route_type)}出愿截止`,
+          type: text(route.intake),
+        });
+      }
+    });
     return rows
       .filter((row) => row.date >= today())
       .sort((a, b) => a.date.localeCompare(b.date))
       .slice(0, 8);
-  }, [state.tasks, state.exams, state.contactEvents, schools, professors]);
+  }, [state.tasks, state.exams, state.contactEvents, state.applicationRoutes, schools, professors]);
 
   const recentActivity = useMemo(() => {
     const contacts = state.contactEvents.map((event) => {
@@ -356,8 +386,11 @@ export function TrackerApp() {
               <Professors
                 professors={filteredProfessors}
                 events={state.contactEvents}
+                routes={state.applicationRoutes}
                 section={professorSection}
                 setSection={setProfessorSection}
+                pipelineFilter={pipelineFilter}
+                setPipelineFilter={setPipelineFilter}
                 expanded={expanded}
                 setExpanded={setExpanded}
                 onEdit={(record) => setEditor({ kind: "professor", record })}
@@ -484,11 +517,11 @@ function Overview({
         </div>
       </section>
 
-      {tasks.some((task) => task.status !== "完成") && (
+      {tasks.some((task) => !/完成/.test(text(task.status))) && (
         <section className="panel">
           <div className="panel-heading"><h3>待办清单</h3></div>
           <div className="chip-list">
-            {tasks.filter((task) => task.status !== "完成").map((task) => (
+            {tasks.filter((task) => !/完成/.test(text(task.status))).map((task) => (
               <span className="task-chip" key={text(task.id)}>
                 {text(task.title)} · {formatDate(task.due_date)}
               </span>
@@ -641,8 +674,11 @@ function SubjectRow({ subject, onSave }: { subject: Row; onSave: (subject: Row) 
 function Professors({
   professors,
   events,
+  routes,
   section,
   setSection,
+  pipelineFilter,
+  setPipelineFilter,
   expanded,
   setExpanded,
   onEdit,
@@ -650,8 +686,11 @@ function Professors({
 }: {
   professors: Row[];
   events: Row[];
+  routes: Row[];
   section: ProfessorSection;
   setSection: (section: ProfessorSection) => void;
+  pipelineFilter: string;
+  setPipelineFilter: (value: string) => void;
   expanded: string;
   setExpanded: (id: string) => void;
   onEdit: (record: Row) => void;
@@ -674,6 +713,17 @@ function Professors({
             {labels[item]}
           </button>
         ))}
+        {section === "current" && (
+          <select
+            aria-label="推进状态"
+            value={pipelineFilter}
+            onChange={(event) => setPipelineFilter(event.target.value)}
+          >
+            {["全部", "重点推进", "等待回复", "需要追信", "长期跟进", "替代入学路线"].map((item) => (
+              <option key={item}>{item}</option>
+            ))}
+          </select>
+        )}
         <span className="result-count">{professors.length} 位教授</span>
       </div>
       <div className="table-card">
@@ -685,6 +735,10 @@ function Professors({
               const professorEvents = events
                 .filter((event) => event.professor_id === professor.id)
                 .sort((a, b) => text(b.occurred_at || b.event_date).localeCompare(text(a.occurred_at || a.event_date)));
+              const professorRoutes = routes
+                .filter((route) => route.professor_id === professor.id && active(route))
+                .sort((a, b) => text(a.intake).localeCompare(text(b.intake)));
+              const routeNext = professorRoutes.find((route) => route.next_action_date);
               const next = professorEvents.find((event) => event.next_action_date);
               return (
                 <Fragment key={text(professor.id)}>
@@ -693,8 +747,8 @@ function Professors({
                     <td>{text(professor.university)}<small>{text(professor.lab)}</small></td>
                     <td className="research-cell">{text(professor.research) || "待补充"}</td>
                     <td><span className="priority">{text(professor.priority)}</span></td>
-                    <td><Badge value={professor.current_status} /></td>
-                    <td>{formatDate(next?.next_action_date)}</td>
+                    <td><Badge value={professor.pipeline_stage || professor.current_status} /><small>{text(professor.professor_stance)}</small></td>
+                    <td>{formatDate(routeNext?.next_action_date || next?.next_action_date)}</td>
                     <td className="row-actions">
                       <button onClick={() => onEvent(professor)}>记联系</button>
                       <button onClick={() => onEdit(professor)}>编辑</button>
@@ -704,7 +758,7 @@ function Professors({
                   {expanded === professor.id && (
                     <tr className="detail-row" key={`${text(professor.id)}-detail`}>
                       <td colSpan={7}>
-                        <ProfessorDetails professor={professor} events={professorEvents} />
+                        <ProfessorDetails professor={professor} events={professorEvents} routes={professorRoutes} />
                       </td>
                     </tr>
                   )}
@@ -720,22 +774,57 @@ function Professors({
   );
 }
 
-function ProfessorDetails({ professor, events }: { professor: Row; events: Row[] }) {
+function ProfessorDetails({ professor, events, routes }: { professor: Row; events: Row[]; routes: Row[] }) {
+  const outbound = events.filter((event) => text(event.direction) === "发出");
+  const followups = events.filter((event) => /追信|再次联系/.test(text(event.event_type)));
+  const firstSent = [...outbound].sort((a, b) => text(a.occurred_at).localeCompare(text(b.occurred_at)))[0];
+  const lastSent = [...outbound].sort((a, b) => text(b.occurred_at).localeCompare(text(a.occurred_at)))[0];
+  const nextAction = routes.find((route) => route.next_action_date)?.next_action_date
+    || events.find((event) => event.next_action_date)?.next_action_date;
+  const gmailThreadId = text(professor.gmail_thread_id)
+    || text(events.find((event) => event.gmail_thread_id)?.gmail_thread_id);
   return (
     <div className="professor-detail">
       <div className="professor-facts">
         <h4>与研究计划的联系</h4><p>{text(professor.fit) || "待补充"}</p>
         <h4>正确申请身份</h4><p>{text(professor.identity) || "待确认"}</p>
         <h4>制度与语言</h4><p>{text(professor.system_status) || "待确认"} · {text(professor.language_status) || "待确认"}</p>
+        <h4>教授态度</h4><p>{text(professor.professor_stance) || "尚未收到回复"}</p>
+        <h4>持续联系</h4>
+        <p>
+          首次：{formatDate(firstSent?.event_date)} · 最近：{formatDate(lastSent?.event_date)} ·
+          已追信 {followups.length} 次 · 下次：{formatDate(nextAction)}
+        </p>
         <h4>主要风险</h4><p>{text(professor.risk) || "无特别记录"}</p>
         {professor.lab_url && <a href={text(professor.lab_url)} target="_blank" rel="noreferrer">研究室主页 ↗</a>}
-        {professor.gmail_thread_id && <a href={`https://mail.google.com/mail/u/0/#all/${text(professor.gmail_thread_id)}`} target="_blank" rel="noreferrer">打开Gmail线程 ↗</a>}
+        {gmailThreadId && <a href={`https://mail.google.com/mail/u/0/#all/${gmailThreadId}`} target="_blank" rel="noreferrer">打开Gmail线程 ↗</a>}
+      </div>
+      <div className="route-list">
+        <h4>可行申请路线</h4>
+        {routes.length ? routes.map((route) => (
+          <article className="route-card" key={text(route.id)}>
+            <header>
+              <strong>{text(route.intake)} · {text(route.route_type)}</strong>
+              <Badge value={route.route_status} />
+            </header>
+            <p>{text(route.professor_stance) || "教授个人接收尚未确认"}</p>
+            <dl>
+              <div><dt>资格</dt><dd>{text(route.eligibility) || "待确认"}</dd></div>
+              <div><dt>语言</dt><dd>{text(route.language) || "待确认"}</dd></div>
+              <div><dt>内诺</dt><dd>{text(route.supervisor_consent) || "待确认"}</dd></div>
+              <div><dt>出愿</dt><dd>{formatDate(route.application_start)}—{formatDate(route.application_end)}</dd></div>
+              <div><dt>考试</dt><dd>{formatDate(route.exam_start)}—{formatDate(route.exam_end)}</dd></div>
+            </dl>
+            {route.note && <p>{text(route.note)}</p>}
+            {route.guidelines_url && <a href={text(route.guidelines_url)} target="_blank" rel="noreferrer">募集要项 ↗</a>}
+          </article>
+        )) : <Empty text="尚未建立可行申请路线。" />}
       </div>
       <div className="contact-timeline">
         <h4>完整联系时间线</h4>
         {events.length ? events.map((event) => (
           <div className="contact-event" key={text(event.id)}>
-            <time>{formatDateTime(event.occurred_at || event.event_date)}</time>
+            <time title={formatDateTime(event.occurred_at || event.event_date)}>{formatDate(event.event_date)}</time>
             <span className="timeline-dot" />
             <div>
               <strong>{text(event.event_type)} · {text(event.direction) || "手动"}</strong>
@@ -811,6 +900,13 @@ function Screenings({
 }
 
 function Activities({ activity, onAdd }: { activity: { id: string; date: string; type: string; title: string; summary: string }[]; onAdd: () => void }) {
+  const groups = activity.reduce<{ date: string; items: typeof activity }[]>((result, item) => {
+    const date = formatDate(item.date);
+    const group = result.find((entry) => entry.date === date);
+    if (group) group.items.push(item);
+    else result.push({ date, items: [item] });
+    return result;
+  }, []);
   return (
     <div className="page-stack">
       <div className="section-intro">
@@ -818,11 +914,17 @@ function Activities({ activity, onAdd }: { activity: { id: string; date: string;
         <button className="button primary" onClick={onAdd}>＋ 记录一项工作</button>
       </div>
       <div className="panel activity-feed">
-        {activity.length ? activity.map((item) => (
-          <div className="feed-row" key={item.id}>
-            <time>{formatDate(item.date)}</time>
+        {groups.length ? groups.map((group) => (
+          <div className="feed-row" key={group.date}>
+            <time>{group.date}</time>
             <span className="feed-line" />
-            <div><Badge value={item.type} /><h3>{item.title}</h3><p>{item.summary || "没有补充说明"}</p></div>
+            <div className="feed-day">
+              {group.items.map((item) => (
+                <div className="feed-item" key={item.id} title={formatDateTime(item.date)}>
+                  <Badge value={item.type} /><h3>{item.title}</h3><p>{item.summary || "没有补充说明"}</p>
+                </div>
+              ))}
+            </div>
           </div>
         )) : <Empty text="还没有工作记录。" />}
       </div>
@@ -989,6 +1091,10 @@ function EditorPanel({ editor, state, onClose, onSaved }: { editor: NonNullable<
             risk: values.risk,
             gmail_thread_id: values.gmail_thread_id,
             current_status: values.current_status,
+            match_grade: values.match_grade,
+            pipeline_stage: values.pipeline_stage,
+            professor_stance: values.professor_stance,
+            research_verified_at: values.research_verified_at,
             archived: 0,
           },
         });
@@ -1115,6 +1221,10 @@ function ProfessorForm({ record }: { record?: Row }) {
       <TextArea label="研究生制度" name="system_status" defaultValue={text(record?.system_status)} />
       <Field label="语言条件" name="language_status" defaultValue={text(record?.language_status)} />
       <Select label="优先级" name="priority" defaultValue={text(record?.priority) || "B"} options={["S", "A", "B", "排除", "已联系"]} />
+      <Select label="研究匹配等级" name="match_grade" defaultValue={text(record?.match_grade) || "B"} options={["A", "B", "C", "D"]} />
+      <Select label="推进分组" name="pipeline_stage" defaultValue={text(record?.pipeline_stage) || "等待回复"} options={["重点推进", "等待回复", "需要追信", "长期跟进", "替代入学路线", "尚未联系", "历史排除"]} />
+      <TextArea label="教授态度（不得把沉默写成愿意接收）" name="professor_stance" defaultValue={text(record?.professor_stance)} />
+      <Field label="研究核查日期" name="research_verified_at" defaultValue={text(record?.research_verified_at)} type="date" />
       <TextArea label="主要风险" name="risk" defaultValue={text(record?.risk)} />
       <Field label="Gmail线程ID" name="gmail_thread_id" defaultValue={text(record?.gmail_thread_id)} />
       <Select label="当前状态" name="current_status" defaultValue={text(record?.current_status) || "候选"} options={["候选", "草稿暂缓", "已发送", "等待回复", "条件性等待", "已回复", "排除", "不再联系"]} />
@@ -1125,14 +1235,14 @@ function ProfessorForm({ record }: { record?: Row }) {
 function ContactForm({ professor }: { professor: Row }) {
   return (
     <FormSection title={`${text(professor.name)}教授的联系事件`}>
-      <Select label="事件类型" name="event_type" defaultValue="教授回复" options={["首次联系", "追信", "申请人回复", "发送更新材料", "教授回复", "退信", "草稿", "暂停", "排除决定"]} />
+      <Select label="事件类型" name="event_type" defaultValue="教授回复" options={["首次联系", "追信", "再次联系", "申请人回复", "发送更新材料", "教授回复", "退信", "草稿", "暂停", "排除决定"]} />
       <Select label="方向" name="direction" defaultValue="收到" options={["发出", "收到", "草稿", "人工决定"]} />
       <Field label="日期" name="event_date" defaultValue={today()} type="date" required />
       <Field label="邮件主题" name="subject" defaultValue="" />
       <TextArea label="准确摘要" name="summary" defaultValue="" required />
       <Field label="附件" name="attachments" defaultValue="" placeholder="研究計画書.pdf；履歴書.pdf" />
-      <Select label="事件后状态" name="status_after" defaultValue="等待回复" options={["已发送", "等待回复", "条件性等待", "已回复", "草稿暂缓", "排除", "不再联系"]} />
-      <Field label="下一行动日期" name="next_action_date" defaultValue="" type="date" />
+      <Select label="事件后状态" name="status_after" defaultValue="等待回复" options={["重点推进", "等待回复", "需要追信", "长期跟进", "替代入学路线", "已回复", "草稿暂缓", "排除", "不再联系"]} />
+      <Field label="下一行动日期（留空则按14/30天规则计算）" name="next_action_date" defaultValue="" type="date" />
     </FormSection>
   );
 }
