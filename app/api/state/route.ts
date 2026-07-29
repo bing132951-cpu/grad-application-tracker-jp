@@ -83,6 +83,7 @@ export async function POST(request: Request) {
       event?: Record<string, string>;
       workEvent?: Record<string, string>;
       reason?: string;
+      backupId?: string;
     };
     const db = await ensureSchema(getD1());
 
@@ -180,6 +181,52 @@ export async function POST(request: Request) {
         .prepare(`UPDATE ${config.table} SET archived=1, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
         .bind(payload.record.id)
         .run();
+      return Response.json({ ok: true });
+    }
+
+    if (payload.action === "restoreBackup" && payload.backupId) {
+      const backup = await db
+        .prepare("SELECT payload_json FROM backups WHERE id=?")
+        .bind(payload.backupId)
+        .first<{ payload_json: string }>();
+      if (!backup?.payload_json) throw new Error("找不到这份备份。");
+      const restored = JSON.parse(backup.payload_json) as Record<string, Record<string, RecordValue>[]>;
+      await createBackup(db, "恢复旧备份前自动保存");
+      const tableMap: Record<string, string> = {
+        profiles: "profiles",
+        schools: "schools",
+        exams: "exams",
+        subjects: "subjects",
+        professors: "professors",
+        contactEvents: "contact_events",
+        workEvents: "work_events",
+        tasks: "tasks",
+      };
+      const deletionOrder = [
+        "subjects",
+        "contact_events",
+        "work_events",
+        "tasks",
+        "exams",
+        "professors",
+        "schools",
+        "profiles",
+      ];
+      await db.batch(deletionOrder.map((table) => db.prepare(`DELETE FROM ${table}`)));
+      for (const [key, rows] of Object.entries(restored)) {
+        const table = tableMap[key];
+        if (!table || !Array.isArray(rows)) continue;
+        for (const row of rows) {
+          const columns = Object.keys(row).filter((column) => /^[a-z_]+$/.test(column));
+          if (!columns.length) continue;
+          await db
+            .prepare(
+              `INSERT INTO ${table} (${columns.join(",")}) VALUES (${columns.map(() => "?").join(",")})`,
+            )
+            .bind(...columns.map((column) => row[column] ?? ""))
+            .run();
+        }
+      }
       return Response.json({ ok: true });
     }
 
